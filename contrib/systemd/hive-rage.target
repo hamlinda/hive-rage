@@ -1,0 +1,7 @@
+[Unit]
+Description=Hive Rage full local stack
+Wants=hive-rage-ingestion.service hive-rage.service hive-rage-frontend.service
+After=hive-rage-ingestion.service hive-rage.service hive-rage-frontend.service
+
+[Install]
+WantedBy=multi-user.target

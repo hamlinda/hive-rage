@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  hive-rage:
+    build: .
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.hiverage.rule=PathPrefix(`/hive`)"
+      - "traefik.http.services.hiverage.loadbalancer.server.port=8000"
+    networks:
+      - proxy
+    restart: unless-stopped
+
+networks:
+  proxy:
+    external: true

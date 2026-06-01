@@ -1,0 +1,2 @@
+[console_scripts]
+hive-rage = hive_rage.cli:main

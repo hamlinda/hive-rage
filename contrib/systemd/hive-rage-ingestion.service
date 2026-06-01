@@ -1,0 +1,17 @@
+[Unit]
+Description=Hive Rage ingestion daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dlh
+Group=dlh
+WorkingDirectory=/opt/hive-rage
+EnvironmentFile=-/etc/default/hive-rage
+ExecStart=/usr/bin/python3 -m hive_rage run-ingestion
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=hive-rage.target

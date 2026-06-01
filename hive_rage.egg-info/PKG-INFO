@@ -1,0 +1,154 @@
+Metadata-Version: 2.4
+Name: hive-rage
+Version: 0.1.0
+Summary: Local Ubuntu service that indexes a hive folder and answers Ollama-backed queries.
+Author-email: hamlinda <hamlinda@gmail.com>
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pypdf>=5.4.0
+Requires-Dist: python-docx>=1.1.2
+
+# Hive Rage
+
+`Hive Rage` is a local Ubuntu service that watches a `hive/` folder, indexes its text content with Ollama embeddings, and answers retrieval-augmented questions against that folder.
+
+It is designed to run cleanly on Ubuntu 25.10 with:
+
+- a local service process
+- a lean JSON HTTP interface for local or remote status/query calls
+- a lean CLI for local interaction
+- Ollama-hosted models for embeddings and generation
+
+## Architecture
+
+- `hive_rage/indexer.py`: polls the `hive/` directory, chunks supported files, and stores embeddings in SQLite.
+- `hive_rage/app.py`: runs the background scanner and exposes `/health`, `/status`, `/models`, `/query`, and `/reindex`.
+- `hive_rage/cli.py`: provides local CLI commands for status, query, model inspection, and reindexing.
+- `contrib/systemd/hive-rage.service`: sample systemd unit for Ubuntu.
+
+Supported file types are configured through `HIVE_RAGE_SUFFIXES` and default to:
+
+- `.txt`
+- `.md`
+- `.rst`
+- `.json`
+- `.yaml`
+- `.yml`
+- `.log`
+- `.csv`
+- `.docx`
+- `.pdf`
+
+For `.docx` and `.pdf`, the service extracts text before chunking and embedding it.
+
+## Recommended Ollama Models
+
+Default balanced setup:
+
+- generation: `llama3:8b`
+- embeddings: `nomic-embed-text`
+
+Lower-memory setup:
+
+- generation: `qwen2.5:3b`
+- embeddings: `nomic-embed-text`
+
+Higher-quality setup:
+
+- generation: `qwen2.5:7b`
+- embeddings: `nomic-embed-text`
+
+Pull the default models:
+
+```bash
+ollama pull llama3:8b
+ollama pull nomic-embed-text
+```
+
+## Local Run
+
+Create a virtual environment if you want isolation:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e .
+```
+
+Create the content folder and add documents:
+
+```bash
+mkdir -p hive
+printf 'The hive contains operational notes.\n' > hive/notes.txt
+```
+
+You can also place `.docx` and `.pdf` files in `hive/`; they will be parsed automatically during indexing.
+
+Start the service:
+
+```bash
+python3 -m hive_rage run-service --host 0.0.0.0 --port 8127
+```
+
+Local CLI usage:
+
+```bash
+hive-rage status
+hive-rage models
+hive-rage query "What is in the hive?"
+hive-rage reindex
+```
+
+Remote or local HTTP usage:
+
+```bash
+curl http://127.0.0.1:8127/health
+curl http://127.0.0.1:8127/status
+curl http://127.0.0.1:8127/models
+curl -X POST http://127.0.0.1:8127/query \
+	-H 'Content-Type: application/json' \
+	-d '{"question":"What is in the hive?","top_k":4}'
+```
+
+## Ubuntu 25.10 Service Install
+
+Deploy the repo to a stable location such as `/opt/hive-rage`, then:
+
+```bash
+sudo cp contrib/systemd/hive-rage.service /etc/systemd/system/
+sudo cp contrib/systemd/hive-rage.env.example /etc/default/hive-rage
+sudo systemctl daemon-reload
+sudo systemctl enable --now hive-rage.service
+```
+
+Check service status:
+
+```bash
+systemctl status hive-rage.service
+journalctl -u hive-rage.service -f
+```
+
+## Execution Model
+
+- Files are discovered by polling every `HIVE_RAGE_POLL_SECONDS` seconds.
+- Changed files are re-chunked and re-embedded.
+- Deleted files are removed from the SQLite index.
+- Queries embed the question, retrieve the top matching chunks, and send a grounded prompt to the generation model.
+
+## Environment Variables
+
+The service reads configuration from environment variables.
+
+```bash
+HIVE_RAGE_HIVE_DIR=hive
+HIVE_RAGE_DB_PATH=var/index.sqlite3
+HIVE_RAGE_OLLAMA_URL=http://127.0.0.1:11434
+HIVE_RAGE_CHAT_MODEL=llama3:8b
+HIVE_RAGE_EMBEDDING_MODEL=nomic-embed-text
+HIVE_RAGE_HOST=0.0.0.0
+HIVE_RAGE_PORT=8127
+HIVE_RAGE_POLL_SECONDS=10
+HIVE_RAGE_TOP_K=4
+HIVE_RAGE_CHUNK_SIZE=1200
+HIVE_RAGE_CHUNK_OVERLAP=200
+```

@@ -1,1 +1,203 @@
-# rag_server
+# Hive Rage
+
+`Hive Rage` is now a three-component local stack:
+
+1. An autonomous ingestion daemon that owns filesystem discovery and database updates.
+2. A backend API that brokers ingestion status, retrieval, configuration, and Ollama-backed query execution.
+3. A local frontend web interface for querying the hive and editing the logical runtime configuration.
+
+The stack is designed so startup can be one command locally and one `systemctl enable --now` for unattended operation. The default local ports are:
+
+- backend API: `8127`
+- ingestion daemon: `8128`
+- frontend UI: `8129`
+
+## Components
+
+- `hive_rage/ingestion.py`: background ingestion daemon with its own health/status endpoints and scan planning.
+- `hive_rage/app.py`: backend API that talks to ingestion and Ollama and serves the query/configuration surface.
+- `hive_rage/frontend.py`: local web interface served as its own process.
+- `hive_rage/indexer.py`: file walking, chunking, metadata persistence, and inventory fingerprinting.
+- `hive_rage/cli.py`: orchestration commands for starting, stopping, checking, and resetting the full stack.
+
+## Startup Logic
+
+`hive-rage start-stack` performs the full startup path in dependency order.
+
+1. It resolves the project base directory and ensures `hive/`, `var/`, and the persisted logical config file exist.
+2. It writes the current runtime configuration to `var/runtime-config.json` so all services read the same logical settings.
+3. It checks whether the ingestion daemon is already healthy on port `8128`. If not, it stops any stale process on that port, starts a new ingestion daemon, and waits for `/health` to succeed.
+4. It checks whether the backend API is healthy on port `8127`. If not, it stops any stale process on that port, starts the backend, and waits for `/health` to succeed.
+5. It checks whether the frontend UI is healthy on port `8129`. If not, it stops any stale process on that port, starts the frontend, and waits for `/health` to succeed.
+6. If any service does not become healthy inside the startup timeout, the command fails with the log file path for that component and the tail of the captured log output.
+
+The ingestion daemon is explicit about when it updates the database. Each poll creates two fingerprints:
+
+- a scope signature derived from the hive path, include/exclude globs, supported suffixes, chunking settings, and embedding model
+- an inventory digest derived from relative file paths, mtimes, and sizes for all files currently inside scope
+
+The daemon only performs a full scan and mutates the database when either fingerprint changes or when a forced reindex is requested. If neither changes, it records a skip reason and leaves the database untouched.
+
+## Error Handling
+
+All three services use JSON success/error envelopes.
+
+- Success responses carry `ok: true` and merge the response payload into the root object.
+- Error responses carry `ok: false` and include `error.code`, `error.message`, and optional `error.details`.
+- The CLI surfaces HTTP failures, startup timeouts, and stale-port collisions with specific remediation messages instead of generic tracebacks.
+- Optional document parsers for `.docx` and `.pdf` are loaded lazily, so missing parser packages do not prevent the stack from starting.
+
+## Recommended Ollama Models
+
+Balanced default:
+
+- chat: `llama3:8b`
+- embeddings: `nomic-embed-text`
+
+Pull the defaults:
+
+```bash
+ollama pull llama3:8b
+ollama pull nomic-embed-text
+```
+
+## Local Run
+
+Create an isolated environment if needed:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e .
+```
+
+Add test content:
+
+```bash
+mkdir -p hive
+printf 'The hive contains operational notes.\n' > hive/notes.txt
+```
+
+Start the complete stack in one command:
+
+```bash
+hive-rage start-stack
+```
+
+Useful local commands:
+
+```bash
+hive-rage stack-status --json
+hive-rage status
+hive-rage models
+hive-rage query "What changed in the hive?"
+hive-rage reindex
+hive-rage stop-stack
+hive-rage reset-start
+```
+
+Run individual components only when debugging:
+
+```bash
+python3 -m hive_rage run-ingestion
+python3 -m hive_rage run-backend
+python3 -m hive_rage run-frontend
+```
+
+Open the frontend locally:
+
+```bash
+xdg-open http://127.0.0.1:8129
+```
+
+## HTTP Interfaces
+
+Backend API:
+
+```bash
+curl http://127.0.0.1:8127/health
+curl http://127.0.0.1:8127/status
+curl http://127.0.0.1:8127/models
+curl -X POST http://127.0.0.1:8127/query \
+	-H 'Content-Type: application/json' \
+	-d '{"question":"What is in the hive?","top_k":4}'
+curl -X POST http://127.0.0.1:8127/reindex \
+	-H 'Content-Type: application/json' \
+	-d '{"force":true}'
+```
+
+Ingestion API:
+
+```bash
+curl http://127.0.0.1:8128/health
+curl http://127.0.0.1:8128/status
+curl -X POST http://127.0.0.1:8128/scan \
+	-H 'Content-Type: application/json' \
+	-d '{"force":true}'
+```
+
+Frontend API proxy:
+
+```bash
+curl http://127.0.0.1:8129/health
+curl http://127.0.0.1:8129/api/status
+```
+
+## Ubuntu Service Install
+
+For automatic startup and silent recovery, use the provided systemd units. They restart each component independently and can be enabled as a single target.
+
+```bash
+sudo cp contrib/systemd/hive-rage.env.example /etc/default/hive-rage
+sudo cp contrib/systemd/hive-rage-ingestion.service /etc/systemd/system/
+sudo cp contrib/systemd/hive-rage.service /etc/systemd/system/
+sudo cp contrib/systemd/hive-rage-frontend.service /etc/systemd/system/
+sudo cp contrib/systemd/hive-rage.target /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hive-rage.target
+```
+
+Health and recovery checks:
+
+```bash
+systemctl status hive-rage.target
+systemctl status hive-rage-ingestion.service
+systemctl status hive-rage.service
+systemctl status hive-rage-frontend.service
+journalctl -u hive-rage-ingestion.service -f
+journalctl -u hive-rage.service -f
+journalctl -u hive-rage-frontend.service -f
+```
+
+## Logical Configuration
+
+The logical runtime configuration is persisted in `var/runtime-config.json` and can be changed either through the frontend or by editing the environment file before systemd startup. The backend persists updates and then asks the ingestion daemon to reload them so the stack stays converged on a single configuration source.
+
+Default settings:
+
+```bash
+HIVE_RAGE_HIVE_DIR=hive
+HIVE_RAGE_DB_PATH=var/index.sqlite3
+HIVE_RAGE_CONFIG_PATH=var/runtime-config.json
+HIVE_RAGE_OLLAMA_URL=http://127.0.0.1:11434
+HIVE_RAGE_CHAT_MODEL=llama3:8b
+HIVE_RAGE_EMBEDDING_MODEL=nomic-embed-text
+HIVE_RAGE_HOST=0.0.0.0
+HIVE_RAGE_PORT=8127
+HIVE_RAGE_INGESTION_HOST=127.0.0.1
+HIVE_RAGE_INGESTION_PORT=8128
+HIVE_RAGE_FRONTEND_HOST=127.0.0.1
+HIVE_RAGE_FRONTEND_PORT=8129
+HIVE_RAGE_POLL_SECONDS=10
+HIVE_RAGE_TOP_K=4
+HIVE_RAGE_CHUNK_SIZE=1200
+HIVE_RAGE_CHUNK_OVERLAP=200
+```
+
+Scope filters remain available and now feed directly into the ingestion scope signature:
+
+```bash
+export HIVE_RAGE_INCLUDE_GLOBS='files/**/*.pdf,files/**/*.docx'
+export HIVE_RAGE_EXCLUDE_GLOBS='files/**/~$*,files/**/Archive/**'
+hive-rage start-stack
+```

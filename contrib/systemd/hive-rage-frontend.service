@@ -1,0 +1,18 @@
+[Unit]
+Description=Hive Rage local frontend
+After=network-online.target hive-rage.service
+Wants=network-online.target
+Requires=hive-rage.service
+
+[Service]
+Type=simple
+User=dlh
+Group=dlh
+WorkingDirectory=/opt/hive-rage
+EnvironmentFile=-/etc/default/hive-rage
+ExecStart=/usr/bin/python3 -m hive_rage run-frontend
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=hive-rage.target
