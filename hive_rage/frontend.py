@@ -130,6 +130,7 @@ class FrontendService:
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
   <title>Hive Rage Control Surface</title>
+  <link rel=\"icon\" href=\"data:,\">
   <style>
     :root {{
       --bg: #f5f0e6;
@@ -403,7 +404,7 @@ class FrontendService:
         }});
         const result = payload.query;
         const sourceLines = (result.sources || []).map((item) => `- ${{item.path}}#${{item.chunk_index}} score=${{item.score}}`);
-        document.getElementById('query-output').textContent = `${{result.answer}}\n\nSources:\n${{sourceLines.join('\n') || 'No sources returned.'}}`;
+        document.getElementById('query-output').textContent = `${{result.answer}}\\n\\nSources:\\n${{sourceLines.join('\\n') || 'No sources returned.'}}`;
         setMessage(message, 'ok', 'Query completed successfully.');
       }} catch (error) {{
         document.getElementById('query-output').textContent = error.message;

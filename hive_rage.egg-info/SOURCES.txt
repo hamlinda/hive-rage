@@ -5,8 +5,11 @@ hive_rage/__main__.py
 hive_rage/app.py
 hive_rage/cli.py
 hive_rage/config.py
+hive_rage/frontend.py
 hive_rage/indexer.py
+hive_rage/ingestion.py
 hive_rage/ollama.py
+hive_rage/service_support.py
 hive_rage.egg-info/PKG-INFO
 hive_rage.egg-info/SOURCES.txt
 hive_rage.egg-info/dependency_links.txt
